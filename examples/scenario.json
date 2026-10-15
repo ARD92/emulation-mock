@@ -1,0 +1,20 @@
+{
+  "base_directory": "out",
+  "snapshot_minutes_ago": 45,
+  "force": false,
+  "snapshot": {
+    "source": "sample_rib.txt",
+    "rt_allowlist": "rt_allowlist.txt",
+    "keep_idl": true
+  },
+  "cmdb": {
+    "input": "cmdb_changes.json"
+  },
+  "config_changes": {
+    "input": "config_changes.json"
+  },
+  "bgp_updates": {
+    "input": "bgp_updates.json",
+    "snapshot": "generated"
+  }
+}

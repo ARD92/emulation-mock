@@ -1,0 +1,71 @@
+{
+  "bgp_cmdb": [
+    {
+      "interface_ip": "32.155.155.155",
+      "router_name": "CL5OH555RV5",
+      "network": "CBB",
+      "loopback": "Loopback0",
+      "interface_ip2": "",
+      "primary_ind": "1",
+      "update_type": "A"
+    },
+    {
+      "interface_ip": "32.130.196.181",
+      "router_name": "CL2OH158RV2",
+      "network": "CBB",
+      "loopback": "Loopback0",
+      "primary_ind": "1",
+      "update_type": "D"
+    }
+  ],
+  "session_limit_cmdb": [
+    {
+      "network": "CBB",
+      "src_name": "BTMMD308ME1",
+      "target_address": "32.155.155.155",
+      "ip_type": "VPNv4",
+      "direction": "import",
+      "max_prefixes": 5500000,
+      "max_prefix_threshold_pct": 75,
+      "thresh_action": "teardown",
+      "update_type": "A"
+    }
+  ],
+  "vrf_limits": [
+    {
+      "network": "CBB",
+      "router_name": "ATNGA404ME9",
+      "vrf_name": "NMVPN",
+      "description": "NMVPN for Network Management",
+      "route_distinguisher": "13979:105500",
+      "ip_type": "IPv4",
+      "max_prefixes": 100,
+      "max_prefix_threshold_pct": 75,
+      "thresh_action": "teardown",
+      "update_type": "M"
+    }
+  ],
+  "rr_plane_cmdb": [
+    {
+      "network": "CBB",
+      "router_name": "CGCIL162RV2",
+      "plane": "E",
+      "cluster_id": "2.0.4.9",
+      "cluster_name": "NC3",
+      "update_type": "M"
+    }
+  ],
+  "rt_limits": [
+    {
+      "network": "CBB",
+      "router_name": "ATNGA404ME9",
+      "vrf_name": "NMVPN",
+      "direction": "import",
+      "rt": "13979:100499",
+      "max_prefixes": 100,
+      "max_prefix_threshold_pct": 75,
+      "thresh_action": "teardown",
+      "update_type": "A"
+    }
+  ]
+}

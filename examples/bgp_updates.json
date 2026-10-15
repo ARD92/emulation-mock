@@ -1,0 +1,83 @@
+{
+  "actions": [
+    {
+      "name": "advertise_to_new_rr",
+      "type": "advertise",
+      "select": {
+        "rts": ["13979:100499"],
+        "safi": "128",
+        "limit": 1
+      },
+      "set": {
+        "source": "32.155.155.155"
+      }
+    },
+    {
+      "name": "withdraw_from_old_rr",
+      "type": "withdraw",
+      "select": {
+        "rts": ["13979:100499"],
+        "safi": "128",
+        "source": "32.130.198.49",
+        "limit": 1
+      }
+    },
+    {
+      "name": "prefix_flap",
+      "type": "flap",
+      "repeats": 3,
+      "interval_seconds": 30,
+      "select": {
+        "rts": ["13979:100499"],
+        "safi": "128",
+        "prefix": "10.1.0.0/24",
+        "limit": 1
+      }
+    },
+    {
+      "name": "attribute_shift",
+      "type": "attribute_change",
+      "select": {
+        "rts": ["13979:100499"],
+        "safi": "128",
+        "limit": 1
+      },
+      "attributes": {
+        "nexthop": "192.0.2.1",
+        "local_pref_delta": 50,
+        "med_delta": 100,
+        "prepend_asn": "65000",
+        "prepend_hops": 3,
+        "origin_asn": "65001",
+        "origin": "Incomplete",
+        "community_add": "65535:1"
+      }
+    },
+    {
+      "name": "staggered_ads",
+      "type": "staggered",
+      "op": "A",
+      "interval_seconds": 20,
+      "select": {
+        "rts": ["13979:100499"],
+        "safi": "128",
+        "limit": 2
+      }
+    },
+    {
+      "name": "synthetic_prefix",
+      "type": "advertise",
+      "prefixes": [
+        {
+          "safi": "128",
+          "prefix": "10.50.0.0/24",
+          "rd": "13979:100499",
+          "rt": "13979:100499",
+          "source": "32.130.198.49",
+          "originator": "12.123.71.144",
+          "nexthop": "192.0.2.50"
+        }
+      ]
+    }
+  ]
+}

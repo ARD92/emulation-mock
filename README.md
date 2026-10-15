@@ -1,0 +1,111 @@
+# BGP mock generator
+
+Generates mailbox files for BGP anomaly tests. A scenario file points at the inputs. Each input owns one kind of change, so a new case is another record in that file.
+
+## What it writes
+
+| Section | Output |
+|---|---|
+| Filtered snapshot | `{base}/lrsi-data/bgp/dumps/text/YYYYMMDDHHMM.txt.gz` |
+| BGP updates | `{base}/lrsi-data/bgp/updates/text/YYYYMMDDHHMM.txt.gz` |
+| `bgp_cmdb` | `{base}/netdb-data/bgp/updates/Loopback_to_RouterName_YYYYMMDDHHMM.txt.gz` |
+| `session_limit_cmdb` | `{base}/netdb-data/prefix_limits/updates/Session_Limits_YYYYMMDDHHMM.txt.gz` |
+| `vrf_limits` | `{base}/netdb-data/prefix_limits/updates/VRF_Limits_YYYYMMDDHHMM.txt.gz` |
+| `rr_plane_cmdb` | `{base}/netdb-data/prefix_limits/updates/RR_Plane_Cluster_YYYYMMDDHHMM.txt.gz` |
+| `rt_limits` | `{base}/netdb-data/prefix_limits/updates/RT_Limits_cmdb_YYYYMMDDHHMM.txt.gz` |
+| Config change | `{base}/netdb-data/config/updates/Config_Changes_YYYYMMDDHHMM.txt.gz` plus `*_baseline.cfg` and `*_modified.cfg` |
+
+The snapshot clock is `snapshot_minutes_ago` before the run time. The default is 45 minutes, inside a 30 to 60 minute window. Update lines start at the run time. Each update action gets its own file so advertise, withdraw, flap, and attribute files stay apart.
+
+A manifest of every file, line count, and MD5 is written to `{base}/mock-generator/latest.json`.
+
+## Run
+
+From this directory:
+
+```bash
+python3 generate.py run examples/scenario.json --base-directory /tmp/bgp-mock --force
+```
+
+The example scenario reads `examples/sample_rib.txt`. Point `snapshot.source` at a full dump (plain text or `.gz`) and `snapshot.rt_allowlist` at the RT list for a real run.
+
+`bgp_updates.snapshot` set to `generated` reads the filtered snapshot. Point it at the original dump when an action must use rows the RT filter removed.
+
+Individual sections:
+
+```bash
+python3 generate.py snapshot --base-directory /tmp/bgp-mock \
+  --source /path/to/dump.txt.gz --rt-allowlist examples/rt_allowlist.txt
+
+python3 generate.py cmdb --base-directory /tmp/bgp-mock --input examples/cmdb_changes.json
+
+python3 generate.py updates --base-directory /tmp/bgp-mock \
+  --input examples/bgp_updates.json --snapshot /tmp/bgp-mock/lrsi-data/bgp/dumps/text/<tag>.txt.gz
+
+python3 generate.py config --base-directory /tmp/bgp-mock --input examples/config_changes.json
+
+python3 generate.py datasets
+```
+
+`--now 2026-10-15T18:00:00+00:00` pins the clock. `--force` replaces files that already use that minute tag. Times are UTC.
+
+## Snapshot filter
+
+The RT list replaces the Mongo allowlist used by `drop_idl.py`. Accepted spellings are `13979:100499`, `RT:13979:100499`, and `RT,13979,100499`. A JSON list or object also works. An empty list writes nothing.
+
+| SAFI | Keep rule |
+|---|---|
+| 128 L3VPN | Extended community contains an allowlisted RT (`RT,asn,num`) |
+| 132 RTC | NLRI contains an allowlisted RT (`13979:100298/96`) |
+| 4 IDL | Engine2 session gates: origin `INCOMPLETE`, ASN `4210010000`, community `:8218` before `:8208` / `:8217` / `:3102` |
+| 1 and 65 | Dropped |
+
+Set `"keep_idl": false` in the scenario, or pass `--no-idl`, to drop SAFI 4 as well. Kept rows keep their op (`R` or `A`). Only the timestamp is rewritten.
+
+## CMDB input
+
+`examples/cmdb_changes.json` is the template. Each key is a dataset. Each record is one inserted (`A`), deleted (`D`), or modified (`M`) row. Date columns are filled from the run clock when omitted.
+
+- `bgp_cmdb` date is `YYYYMMDD`
+- `session_limit_cmdb` and `vrf_limits` date is `YYYYMMDD`
+- `rr_plane_cmdb` `file_date` is `YYYY-MM-DD`
+- `rt_limits` date is `YYYYMMDD`
+
+To add a dataset, append a `TableSpec` in `bgp_mock/cmdb.py` and put a list under that name in the CMDB input. `python3 generate.py datasets` prints the output path.
+
+## BGP update input
+
+`examples/bgp_updates.json` lists actions. A `select` block reads the snapshot. A `prefixes` list builds new rows from a template.
+
+Select keys: `rts`, `safi`, `source`, `originator`, `prefix`, `nlri_contains`, `limit`, `unique_nlri` (default true), `ops` (default `R` and `A`).
+
+| type | Lines written |
+|---|---|
+| `advertise` | One `A` per selected or synthetic prefix. `set` replaces columns such as `source`. |
+| `withdraw` | One `W` per prefix. |
+| `flap` | `A` then `W`, `repeats` times, spaced by `interval_seconds`. |
+| `attribute_change` | One `A` with attribute edits. |
+| `staggered` | One row per prefix, spaced by `interval_seconds`. `op` is `A` or `W`. |
+
+Attribute keys follow the RR-migration churn notebook:
+
+- `nexthop`, `local_pref`, `local_pref_delta`, `med`, `med_delta`
+- `as_path`, `prepend_asn`, `prepend_hops`, `origin_asn`
+- `origin`, `community`, `community_add`, `ext_community`, `rt`
+- `source`, `originator`, `cluster`, `peer_asn`
+
+`interval_seconds` on `advertise`, `withdraw`, or `attribute_change` spaces those lines the same way `staggered` does.
+
+A new action type is a value in `ACTION_TYPES` plus a branch in `expand_action` (`bgp_mock/updates.py`).
+
+## Config changes
+
+`examples/config_changes.json` carries `baseline_config` and `modified_config` for each router. `update_type` `M` requires both texts. `A` requires the modified text. `D` requires the baseline text.
+
+The index gzip points at the two `.cfg` files. That path is `netdb-data/config/updates/` because a config mailbox path was not part of the CMDB layout.
+
+## Tests
+
+```bash
+python3 -m unittest discover -s tests -v
+```

@@ -1,0 +1,4 @@
+# Route targets to keep. One per line.
+# Also accepted: RT:13979:100499 and RT,13979,100499
+13979:100499
+13979:100298
