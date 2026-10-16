@@ -192,9 +192,18 @@ class ScenarioTest(unittest.TestCase):
         self.assertEqual([_prefix(row) for row in advertised[:2]], ["10.50.0.0/24", "10.50.1.0/24"])
         self.assertEqual(_prefix(advertised[-1]), "10.50.99.0/24")
         self.assertTrue(all(row.split("|")[IDX_OP] == "A" for row in advertised))
-        self.assertEqual(advertised[0].split("|")[IDX_SOURCE], "32.130.196.181")
-        self.assertEqual(advertised[0].split("|")[IDX_ORIGINATOR], "12.123.71.144")
-        self.assertIn("RT,13979,7285", advertised[0])
+        first_ad = advertised[0].split("|")
+        self.assertGreaterEqual(len(first_ad), 20)
+        self.assertEqual(first_ad[IDX_SOURCE], "32.130.196.181")
+        self.assertEqual(first_ad[IDX_ORIGINATOR], "12.123.71.144")
+        self.assertEqual(first_ad[7], "1,128;13979:7285;22;10.50.0.0/24")
+        self.assertEqual(first_ad[14], "RT_AS2,13979,7285")
+        self.assertEqual(first_ad[IDX_NEXTHOP], "12.123.71.144")
+        self.assertEqual(first_ad[13], "")
+        self.assertEqual(first_ad[15], "AG")
+        self.assertEqual(first_ad[16], "32.130.196.181")
+        self.assertEqual(first_ad[17], "13979")
+        self.assertEqual(first_ad[19], "12.123.71.144")
         self.assertEqual(advertised[0].split("|")[IDX_TS], "2026-10-15+18:00:00")
         self.assertEqual(advertised[1].split("|")[IDX_TS], "2026-10-15+18:00:20")
         self.assertEqual(advertised[-1].split("|")[IDX_TS], "2026-10-15+18:33:00")
@@ -267,6 +276,89 @@ class PrefixBlockTest(unittest.TestCase):
 
     def test_one_prefix_is_the_block_itself(self):
         self.assertEqual(expand_prefix_block("10.50.0.0/16", 1), ["10.50.0.0/16"])
+
+    def _one(self, action: dict) -> str:
+        with tempfile.TemporaryDirectory() as tmp:
+            written = write_updates(
+                {"actions": [action]},
+                None,
+                Path(tmp),
+                NOW,
+                force=True,
+            )
+            return _rows(Path(written[0]["path"]))[0]
+
+    def test_inet_ipv4_uses_afi_1_safi_1(self):
+        line = self._one({
+            "name": "ads",
+            "type": "advertise",
+            "update_type": "inet",
+            "ip_type": "ipv4",
+            "prefix": "10.9.0.0/24",
+            "count": 1,
+            "interval_seconds": 0,
+            "originator_id": "12.123.71.144",
+            "source": "32.130.196.181",
+        })
+        tokens = line.split("|")
+        self.assertEqual(tokens[7], "1,1;10.9.0.0/24")
+        self.assertEqual(tokens[14], "")
+
+    def test_inet_ipv6_uses_afi_2_safi_1(self):
+        line = self._one({
+            "name": "ads",
+            "type": "advertise",
+            "update_type": "inet",
+            "ip_type": "ipv6",
+            "prefix": "2001:db8::/32",
+            "count": 1,
+            "interval_seconds": 0,
+            "originator_id": "2001:db8::1",
+            "source": "2001:db8::2",
+        })
+        self.assertEqual(line.split("|")[7], "2,1;2001:db8::/32")
+
+    def test_l3vpn_ipv6_uses_afi_2_safi_128(self):
+        line = self._one({
+            "name": "ads",
+            "type": "advertise",
+            "update_type": "l3vpn",
+            "ip_type": "ipv6",
+            "prefix": "2001:db8::/32",
+            "count": 1,
+            "interval_seconds": 0,
+            "rt": "13979:7285",
+            "rd": "13979:7285",
+            "originator_id": "2001:db8::1",
+            "source": "2001:db8::2",
+        })
+        tokens = line.split("|")
+        self.assertEqual(tokens[7], "2,128;13979:7285;22;2001:db8::/32")
+        self.assertEqual(tokens[14], "RT_AS2,13979,7285")
+
+    def test_ip_type_must_match_the_prefix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(ValueError):
+                write_updates(
+                    {
+                        "actions": [
+                            {
+                                "name": "ads",
+                                "type": "advertise",
+                                "update_type": "inet",
+                                "ip_type": "ipv6",
+                                "prefix": "10.9.0.0/24",
+                                "count": 1,
+                                "originator_id": "12.123.71.144",
+                                "source": "32.130.196.181",
+                            }
+                        ]
+                    },
+                    None,
+                    Path(tmp),
+                    NOW,
+                    force=True,
+                )
 
     def test_missing_identity_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:

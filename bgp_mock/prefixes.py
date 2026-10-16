@@ -1,4 +1,4 @@
-"""Carve a CIDR block into the prefixes carried by L3VPN updates."""
+"""Carve a CIDR block into the prefixes carried by BGP updates."""
 
 from __future__ import annotations
 

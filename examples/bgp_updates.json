@@ -3,6 +3,8 @@
     {
       "name": "advertise_block",
       "type": "advertise",
+      "update_type": "l3vpn",
+      "ip_type": "ipv4",
       "prefix": "10.50.0.0/16",
       "rt": "13979:7285",
       "rd": "13979:7285",

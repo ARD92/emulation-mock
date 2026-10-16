@@ -79,7 +79,18 @@ To add a dataset, append a `TableSpec` in `bgp_mock/cmdb.py` and put a list unde
 
 ### Advertise a prefix block
 
-`prefix` is the subnet. The tool carves it into L3VPN routes (SAFI 128). `count` defaults to 100. `interval_seconds` defaults to 20, so each advertisement is 20 seconds after the previous one. `rt`, `rd`, `source`, and `originator_id` are required.
+`prefix` is the subnet. `update_type` is `l3vpn` (default) or `inet`. `ip_type` is `ipv4` (default) or `ipv6`, and it must match the prefix. `count` defaults to 100. `interval_seconds` defaults to 20. `source` and `originator_id` are required. L3VPN also requires `rt` and `rd`.
+
+| update_type | ip_type | NLRI |
+|---|---|---|
+| `l3vpn` | `ipv4` | `1,128;<rd>;22;<prefix>` plus `RT_AS2,<asn>,<number>` |
+| `l3vpn` | `ipv6` | `2,128;<rd>;22;<prefix>` plus `RT_AS2,<asn>,<number>` |
+| `inet` | `ipv4` | `1,1;<prefix>` |
+| `inet` | `ipv6` | `2,1;<prefix>` |
+
+The RD is written as given, so an IP RD such as `1,12.122.31.83,13` stays in that form. Nexthop and cluster default to `originator_id`. For L3VPN, column 3 must be a VPN route reflector cloudstorage has already loaded. For inet, it must be an internet route reflector.
+
+The current cloudstorage update reader keeps AFI 1 only: inet is `1,1` and L3VPN is `1,128`. IPv6 rows use AFI 2 and are skipped by that reader until it accepts AFI 2.
 
 A /16 with count 100 becomes one hundred /24s, `10.50.0.0/24` through `10.50.99.0/24`. Set `prefix_length` when the carved length should be something else. One prefix (`count` 1) advertises the block itself.
 

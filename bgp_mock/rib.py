@@ -26,8 +26,12 @@ IDX_LOCAL_PREF = 11
 IDX_MED = 12
 IDX_COMMUNITY = 13
 IDX_EXT = 14
+IDX_ATOMIC = 15
+IDX_AGG_ADDR = 16
+IDX_AGG_AS = 17
 IDX_ORIGINATOR = 18
 IDX_CLUSTER = 19
+L3VPN_LABEL = "22"
 
 MIN_TOKENS = 20
 SNAPSHOT_OPS = frozenset({"R", "A"})
@@ -56,6 +60,9 @@ FIELD_INDEX = {
     "med": IDX_MED,
     "community": IDX_COMMUNITY,
     "ext_community": IDX_EXT,
+    "atomic_aggregate": IDX_ATOMIC,
+    "aggregator_address": IDX_AGG_ADDR,
+    "aggregator_as": IDX_AGG_AS,
     "originator": IDX_ORIGINATOR,
     "cluster": IDX_CLUSTER,
 }
@@ -254,13 +261,16 @@ def prefix_of(nlri: str) -> str:
 
 
 def set_rt(tokens: list[str], rt: str) -> None:
-    """Write `asn:num` into the extended community and into a SAFI 132 NLRI."""
+    """Write one RT_AS2 extended community, the form cloudstorage keeps.
+
+    SAFI 132 also receives the same asn:num inside the NLRI.
+    """
     normalized = normalize_rt(rt)
     if ":" not in normalized:
         raise ValueError(f"RT must look like asn:num, got {rt!r}")
     asn, num = normalized.split(":", 1)
     ensure_width(tokens, IDX_EXT)
-    tokens[IDX_EXT] = f"RT,{asn},{num}"
+    tokens[IDX_EXT] = f"RT_AS2,{asn},{num}"
     nlri = tokens[IDX_NLRI]
     _afi, safi = afi_safi(nlri)
     if safi == SAFI_RTC:
@@ -359,6 +369,7 @@ def materialize_prefix(item: dict, template: str) -> str:
         raise ValueError("template line is not a BGP dump row")
     tokens = tokens[:]
     safi = str(item.get("safi") or "128")
+    afi = str(item.get("afi") or "1")
     if item.get("nlri"):
         tokens[IDX_NLRI] = str(item["nlri"])
     elif safi == SAFI_RTC:
@@ -367,17 +378,46 @@ def materialize_prefix(item: dict, template: str) -> str:
             raise ValueError("SAFI 132 prefix needs rt")
         origin_as = item.get("origin_as", "7018")
         tokens[IDX_NLRI] = f"1,132;{origin_as},2,{normalize_rt(str(rt))}/96"
-    else:
+    elif safi == SAFI_L3VPN:
         prefix = item.get("prefix")
         if not prefix:
             raise ValueError("prefix requires prefix or nlri")
         rd = item.get("rd") or item.get("rt") or "13979:1"
-        tokens[IDX_NLRI] = f"1,{safi};{rd};{prefix}"
-    if item.get("rt"):
+        label = item.get("label") or L3VPN_LABEL
+        # cloudstorage reads RD at semicolon [1] and the prefix at semicolon [3].
+        tokens[IDX_NLRI] = f"{afi},{safi};{rd};{label};{prefix}"
+    else:
+        prefix = item.get("prefix")
+        if not prefix:
+            raise ValueError("prefix requires prefix or nlri")
+        # Inet: cloudstorage reads the prefix at semicolon [1].
+        tokens[IDX_NLRI] = f"{afi},{safi};{prefix}"
+    if item.get("rt") and safi == SAFI_L3VPN:
         set_rt(tokens, str(item["rt"]))
     column_values = {key: item[key] for key in FIELD_INDEX if key in item and key != "nlri"}
     apply_set(tokens, column_values)
+    if not item.get("nlri") and safi in {SAFI_L3VPN, SAFI_INET}:
+        _fill_path_columns(tokens, item)
+        if safi == SAFI_INET:
+            tokens[IDX_EXT] = ""
     return join_line(tokens)
+
+
+def _fill_path_columns(tokens: list[str], item: dict) -> None:
+    """Replace template leftovers with the columns the update parser stores."""
+    ensure_width(tokens, IDX_CLUSTER)
+    if "community" not in item:
+        tokens[IDX_COMMUNITY] = ""
+    if "nexthop" not in item:
+        tokens[IDX_NEXTHOP] = tokens[IDX_ORIGINATOR] or tokens[IDX_SOURCE]
+    if "atomic_aggregate" not in item:
+        tokens[IDX_ATOMIC] = "AG"
+    if "aggregator_address" not in item:
+        tokens[IDX_AGG_ADDR] = tokens[IDX_SOURCE]
+    if "aggregator_as" not in item:
+        tokens[IDX_AGG_AS] = tokens[IDX_PEER_ASN]
+    if "cluster" not in item:
+        tokens[IDX_CLUSTER] = tokens[IDX_ORIGINATOR]
 
 
 def row_matches(tokens: list[str], select: dict) -> bool:

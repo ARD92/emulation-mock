@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -111,21 +112,52 @@ def _is_prefix_block(action: dict) -> bool:
     return "/" in cidr
 
 
-def _identity(action: dict, name: str) -> tuple[str, str, str, str]:
-    """RT, RD, source, and originator_id are required for a generated block."""
+def _update_type(action: dict, name: str) -> str:
+    """`l3vpn` is SAFI 128. `inet` is SAFI 1."""
+    raw = str(action.get("update_type") or "l3vpn").strip().lower()
+    if raw not in {"l3vpn", "inet"}:
+        raise ValueError(f"action {name}: update_type must be l3vpn or inet, got {raw!r}")
+    return raw
+
+
+def _ip_type(action: dict, network: ipaddress._BaseNetwork, name: str) -> str:
+    """`ipv4` is AFI 1. `ipv6` is AFI 2. Omitted type follows the prefix."""
+    raw = action.get("ip_type")
+    if raw is None or str(raw).strip() == "":
+        return "ipv4" if network.version == 4 else "ipv6"
+    kind = str(raw).strip().lower()
+    if kind not in {"ipv4", "ipv6"}:
+        raise ValueError(f"action {name}: ip_type must be ipv4 or ipv6, got {kind!r}")
+    expected = 4 if kind == "ipv4" else 6
+    if network.version != expected:
+        raise ValueError(
+            f"action {name}: ip_type {kind} does not match prefix {network}"
+        )
+    return kind
+
+
+def _afi_safi(update_type: str, ip_type: str) -> tuple[str, str]:
+    afi = "1" if ip_type == "ipv4" else "2"
+    safi = "128" if update_type == "l3vpn" else "1"
+    return afi, safi
+
+
+def _identity(action: dict, name: str, update_type: str) -> tuple[str, str, str, str]:
+    """Source and originator_id are always required. L3VPN also requires RT and RD."""
     originator = action.get("originator_id", action.get("originator"))
     fields = {
-        "rt": action.get("rt"),
-        "rd": action.get("rd"),
         "source": action.get("source"),
         "originator_id": originator,
     }
+    if update_type == "l3vpn":
+        fields["rt"] = action.get("rt")
+        fields["rd"] = action.get("rd")
     missing = [key for key, value in fields.items() if value is None or str(value).strip() == ""]
     if missing:
         raise ValueError(f"action {name}: missing {', '.join(missing)}")
     return (
-        str(fields["rt"]).strip(),
-        str(fields["rd"]).strip(),
+        str(fields.get("rt") or "").strip(),
+        str(fields.get("rd") or "").strip(),
         str(fields["source"]).strip(),
         str(fields["originator_id"]).strip(),
     )
@@ -134,25 +166,45 @@ def _identity(action: dict, name: str) -> tuple[str, str, str, str]:
 def _block_bases(action: dict, name: str) -> list[str]:
     if action["type"] not in BLOCK_TYPES:
         raise ValueError(f"action {name}: a prefix block is supported on advertise, withdraw, and attribute_change")
-    rt, rd, source, originator = _identity(action, name)
+    update_type = _update_type(action, name)
+    cidr = _block_cidr(action)
+    try:
+        network = ipaddress.ip_network(cidr, strict=False)
+    except ValueError as exc:
+        raise ValueError(f"action {name}: prefix must be a CIDR block, got {cidr!r}") from exc
+    ip_type = _ip_type(action, network, name)
+    afi, safi = _afi_safi(update_type, ip_type)
+    rt, rd, source, originator = _identity(action, name, update_type)
     count = _count(action, DEFAULT_BLOCK_COUNT)
     length = action.get("prefix_length")
     if length is not None:
         length = int(length)
-    prefixes = expand_prefix_block(_block_cidr(action), int(count), length)
+    prefixes = expand_prefix_block(cidr, int(count), length)
     template = action.get("template_line") or BUILTIN_TEMPLATE
     bases: list[str] = []
     for prefix in prefixes:
         item = {
-            "safi": "128",
+            "afi": afi,
+            "safi": safi,
             "prefix": prefix,
-            "rd": rd,
-            "rt": rt,
             "source": source,
             "originator": originator,
         }
-        if action.get("nexthop"):
-            item["nexthop"] = action["nexthop"]
+        if update_type == "l3vpn":
+            item["rd"] = rd
+            item["rt"] = rt
+        for key in (
+            "nexthop",
+            "cluster",
+            "community",
+            "peer_asn",
+            "label",
+            "atomic_aggregate",
+            "aggregator_address",
+            "aggregator_as",
+        ):
+            if action.get(key) not in (None, ""):
+                item[key] = action[key]
         bases.append(materialize_prefix(item, template))
     return bases
 
