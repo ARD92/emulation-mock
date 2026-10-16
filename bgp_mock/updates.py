@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from bgp_mock.io_util import load_json, open_text, write_gz
+from bgp_mock.prefixes import expand_prefix_block
 from bgp_mock.rib import (
     BUILTIN_TEMPLATE,
     IDX_NLRI,
@@ -29,6 +30,9 @@ DEFAULT_OP = {
     "staggered": "A",
     "flap": "A",
 }
+BLOCK_TYPES = frozenset({"advertise", "withdraw", "attribute_change"})
+DEFAULT_BLOCK_COUNT = 100
+DEFAULT_ADVERTISE_INTERVAL = 20
 
 
 def load_updates(path: Path) -> dict:
@@ -75,8 +79,112 @@ def select_lines(source: Path, select: dict) -> list[str]:
     return found
 
 
-def _bases_for(action: dict, snapshot: Path | None, index: int) -> list[str]:
-    name = action.get("name") or f"{action['type']}-{index}"
+def _action_name(action: dict, index: int) -> str:
+    return str(action.get("name") or f"{action['type']}-{index}")
+
+
+def _count(action: dict, default: int | None) -> int | None:
+    if "count" in action and action["count"] is not None:
+        raw = action["count"]
+    elif "num_prefixes" in action and action["num_prefixes"] is not None:
+        raw = action["num_prefixes"]
+    else:
+        return default
+    try:
+        count = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"count must be an integer, got {raw!r}") from exc
+    if count < 1:
+        raise ValueError(f"count must be >= 1, got {count}")
+    return count
+
+
+def _block_cidr(action: dict) -> str:
+    raw = action.get("prefix", action.get("subnet"))
+    if raw is None:
+        return ""
+    return str(raw).strip()
+
+
+def _is_prefix_block(action: dict) -> bool:
+    cidr = _block_cidr(action)
+    return "/" in cidr
+
+
+def _identity(action: dict, name: str) -> tuple[str, str, str, str]:
+    """RT, RD, source, and originator_id are required for a generated block."""
+    originator = action.get("originator_id", action.get("originator"))
+    fields = {
+        "rt": action.get("rt"),
+        "rd": action.get("rd"),
+        "source": action.get("source"),
+        "originator_id": originator,
+    }
+    missing = [key for key, value in fields.items() if value is None or str(value).strip() == ""]
+    if missing:
+        raise ValueError(f"action {name}: missing {', '.join(missing)}")
+    return (
+        str(fields["rt"]).strip(),
+        str(fields["rd"]).strip(),
+        str(fields["source"]).strip(),
+        str(fields["originator_id"]).strip(),
+    )
+
+
+def _block_bases(action: dict, name: str) -> list[str]:
+    if action["type"] not in BLOCK_TYPES:
+        raise ValueError(f"action {name}: a prefix block is supported on advertise, withdraw, and attribute_change")
+    rt, rd, source, originator = _identity(action, name)
+    count = _count(action, DEFAULT_BLOCK_COUNT)
+    length = action.get("prefix_length")
+    if length is not None:
+        length = int(length)
+    prefixes = expand_prefix_block(_block_cidr(action), int(count), length)
+    template = action.get("template_line") or BUILTIN_TEMPLATE
+    bases: list[str] = []
+    for prefix in prefixes:
+        item = {
+            "safi": "128",
+            "prefix": prefix,
+            "rd": rd,
+            "rt": rt,
+            "source": source,
+            "originator": originator,
+        }
+        if action.get("nexthop"):
+            item["nexthop"] = action["nexthop"]
+        bases.append(materialize_prefix(item, template))
+    return bases
+
+
+def _from_action_bases(action: dict, name: str, produced: dict[str, list[str]]) -> list[str]:
+    if _is_prefix_block(action):
+        raise ValueError(f"action {name}: set from_action or prefix, not both")
+    ref = str(action["from_action"])
+    if ref not in produced:
+        raise ValueError(f"action {name}: from_action {ref!r} is not an earlier action")
+    rows = produced[ref]
+    count = _count(action, None)
+    if count is None:
+        return list(rows)
+    if count > len(rows):
+        raise ValueError(
+            f"action {name}: count {count} is larger than the {len(rows)} prefixes from {ref}"
+        )
+    return list(rows[:count])
+
+
+def _bases_for(
+    action: dict,
+    snapshot: Path | None,
+    index: int,
+    produced: dict[str, list[str]] | None = None,
+) -> list[str]:
+    name = _action_name(action, index)
+    if action.get("from_action"):
+        return _from_action_bases(action, name, produced or {})
+    if _is_prefix_block(action):
+        return _block_bases(action, name)
     bases: list[str] = []
     select = action.get("select") or {}
     if select:
@@ -90,7 +198,8 @@ def _bases_for(action: dict, snapshot: Path | None, index: int) -> list[str]:
         bases.append(materialize_prefix(item, template))
     if not bases:
         raise ValueError(
-            f"action {name}: no rows. Add select and a snapshot, or a prefixes list."
+            f"action {name}: no rows. Provide prefix/rt/rd/source/originator_id, "
+            "from_action, or select plus a snapshot."
         )
     return bases
 
@@ -116,7 +225,12 @@ def expand_action(action: dict, bases: list[str], start: datetime) -> list[tuple
     """Turn one action into timestamped update lines."""
     kind = action["type"]
     name = action.get("name") or kind
-    interval_seconds = float(action.get("interval_seconds") or 0)
+    if "interval_seconds" in action and action["interval_seconds"] is not None:
+        interval_seconds = float(action["interval_seconds"])
+    elif kind == "advertise" and _is_prefix_block(action):
+        interval_seconds = DEFAULT_ADVERTISE_INTERVAL
+    else:
+        interval_seconds = 0.0
     if kind == "staggered" and interval_seconds <= 0:
         raise ValueError(f"action {name}: staggered requires interval_seconds > 0")
     if kind == "flap" and interval_seconds <= 0:
@@ -163,14 +277,18 @@ def write_updates(
     actions = spec["actions"]
     cursor = now.replace(microsecond=0)
     used_tags: set[str] = set()
+    produced: dict[str, list[str]] = {}
     written: list[dict] = []
     for index, action in enumerate(actions, start=1):
-        name = action.get("name") or f"{action['type']}-{index}"
+        name = _action_name(action, index)
+        if name in produced:
+            raise ValueError(f"duplicate action name {name!r}")
         tag = format_tag(cursor)
         if tag in used_tags:
             cursor = _next_minute(cursor)
             tag = format_tag(cursor)
-        bases = _bases_for(action, snapshot, index)
+        bases = _bases_for(action, snapshot, index, produced)
+        produced[name] = bases
         rows = expand_action(action, bases, cursor)
         if format_tag(rows[0][0]) != tag:
             raise RuntimeError(f"action {name}: file tag drifted from the first timestamp")

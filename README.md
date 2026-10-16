@@ -75,28 +75,32 @@ To add a dataset, append a `TableSpec` in `bgp_mock/cmdb.py` and put a list unde
 
 ## BGP update input
 
-`examples/bgp_updates.json` lists actions. A `select` block reads the snapshot. A `prefixes` list builds new rows from a template.
+`examples/bgp_updates.json` is three actions in one file. Each action writes its own gzip under `lrsi-data/bgp/updates/text/`.
 
-Select keys: `rts`, `safi`, `source`, `originator`, `prefix`, `nlri_contains`, `limit`, `unique_nlri` (default true), `ops` (default `R` and `A`).
+### Advertise a prefix block
 
-| type | Lines written |
-|---|---|
-| `advertise` | One `A` per selected or synthetic prefix. `set` replaces columns such as `source`. |
-| `withdraw` | One `W` per prefix. |
-| `flap` | `A` then `W`, `repeats` times, spaced by `interval_seconds`. |
-| `attribute_change` | One `A` with attribute edits. |
-| `staggered` | One row per prefix, spaced by `interval_seconds`. `op` is `A` or `W`. |
+`prefix` is the subnet. The tool carves it into L3VPN routes (SAFI 128). `count` defaults to 100. `interval_seconds` defaults to 20, so each advertisement is 20 seconds after the previous one. `rt`, `rd`, `source`, and `originator_id` are required.
 
-Attribute keys follow the RR-migration churn notebook:
+A /16 with count 100 becomes one hundred /24s, `10.50.0.0/24` through `10.50.99.0/24`. Set `prefix_length` when the carved length should be something else. One prefix (`count` 1) advertises the block itself.
+
+### Withdraw those prefixes
+
+`from_action` names an earlier action in the same file and withdraws those prefixes. `count` withdraws only the first N of them. Omit `count` to withdraw every prefix that action generated.
+
+A withdraw can also name its own `prefix` block. That form uses the same required fields and the same count default of 100.
+
+### Attribute changes
+
+`attribute_change` edits the same earlier prefixes, or its own prefix block. `count` limits how many prefixes in that range are changed. `interval_seconds` is optional here. Set it when the attribute updates should be staggered.
+
+Several attributes can be combined on one action:
 
 - `nexthop`, `local_pref`, `local_pref_delta`, `med`, `med_delta`
 - `as_path`, `prepend_asn`, `prepend_hops`, `origin_asn`
 - `origin`, `community`, `community_add`, `ext_community`, `rt`
 - `source`, `originator`, `cluster`, `peer_asn`
 
-`interval_seconds` on `advertise`, `withdraw`, or `attribute_change` spaces those lines the same way `staggered` does.
-
-A new action type is a value in `ACTION_TYPES` plus a branch in `expand_action` (`bgp_mock/updates.py`).
+`select` still reads rows from a snapshot when an action has no `prefix` and no `from_action`. Select keys: `rts`, `safi`, `source`, `originator`, `prefix`, `nlri_contains`, `limit`, `unique_nlri` (default true), `ops` (default `R` and `A`). `flap` and `staggered` remain available for that snapshot path.
 
 ## Config changes
 

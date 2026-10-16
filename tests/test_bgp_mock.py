@@ -12,6 +12,7 @@ from pathlib import Path
 
 from bgp_mock.cmdb import load_cmdb, write_cmdb
 from bgp_mock.io_util import read_text
+from bgp_mock.prefixes import expand_prefix_block
 from bgp_mock.rib import (
     IDX_AS_PATH,
     IDX_COMMUNITY,
@@ -19,13 +20,14 @@ from bgp_mock.rib import (
     IDX_MED,
     IDX_NEXTHOP,
     IDX_OP,
-    IDX_ORIGIN,
+    IDX_ORIGINATOR,
     IDX_SOURCE,
     IDX_TS,
     classify,
     load_rt_allowlist,
     split_line,
 )
+from bgp_mock.updates import write_updates
 from bgp_mock.scenario import run_scenario
 from bgp_mock.snapshot import filter_snapshot
 
@@ -37,6 +39,10 @@ NOW = datetime(2026, 10, 15, 18, 0, tzinfo=timezone.utc)
 def _rows(path: Path) -> list[str]:
     text = read_text(path)
     return [line for line in text.splitlines() if line]
+
+
+def _prefix(line: str) -> str:
+    return line.split("|")[7].split(";")[-1]
 
 
 class AllowlistAndClassifyTest(unittest.TestCase):
@@ -173,58 +179,48 @@ class ScenarioTest(unittest.TestCase):
         updates = self._by_kind("bgp_updates")
         by_name = {item["name"]: item for item in updates}
         self.assertEqual(
-            [item["tag"] for item in updates],
-            [
-                "202610151800",
-                "202610151801",
-                "202610151802",
-                "202610151804",
-                "202610151805",
-                "202610151806",
-            ],
+            [item["name"] for item in updates],
+            ["advertise_block", "withdraw_block", "attribute_block"],
         )
-
-        advertised = _rows(Path(by_name["advertise_to_new_rr"]["path"]))
-        self.assertEqual(len(advertised), 1)
-        tokens = advertised[0].split("|")
-        self.assertEqual(tokens[IDX_OP], "A")
-        self.assertEqual(tokens[IDX_SOURCE], "32.155.155.155")
-        self.assertEqual(tokens[IDX_TS], "2026-10-15+18:00:00")
-
-        withdrawn = _rows(Path(by_name["withdraw_from_old_rr"]["path"]))
-        self.assertEqual(withdrawn[0].split("|")[IDX_OP], "W")
-        self.assertEqual(withdrawn[0].split("|")[IDX_SOURCE], "32.130.198.49")
-
-        flap = _rows(Path(by_name["prefix_flap"]["path"]))
-        self.assertEqual([row.split("|")[IDX_OP] for row in flap], ["A", "W", "A", "W", "A", "W"])
-        self.assertTrue(all("10.1.0.0/24" in row for row in flap))
-        self.assertEqual(flap[0].split("|")[IDX_TS], "2026-10-15+18:02:00")
-        self.assertEqual(flap[1].split("|")[IDX_TS], "2026-10-15+18:02:30")
-        self.assertEqual(flap[-1].split("|")[IDX_TS], "2026-10-15+18:04:30")
-
-        shifted = _rows(Path(by_name["attribute_shift"]["path"]))[0].split("|")
-        self.assertEqual(shifted[IDX_OP], "A")
-        self.assertEqual(shifted[IDX_NEXTHOP], "192.0.2.1")
-        self.assertEqual(shifted[IDX_LOCAL_PREF], "150")
-        self.assertEqual(shifted[IDX_MED], "100")
-        self.assertEqual(shifted[IDX_ORIGIN], "Incomplete")
-        self.assertEqual(shifted[IDX_AS_PATH], "65000 65000 65000 7018 65001")
-        self.assertIn("65535:1", shifted[IDX_COMMUNITY])
-        self.assertEqual(shifted[IDX_SOURCE], "32.130.198.49")
-
-        staggered = _rows(Path(by_name["staggered_ads"]["path"]))
         self.assertEqual(
-            [row.split("|")[IDX_TS] for row in staggered],
-            ["2026-10-15+18:05:00", "2026-10-15+18:05:20"],
+            [item["tag"] for item in updates],
+            ["202610151800", "202610151833", "202610151834"],
         )
-        self.assertIn("10.1.0.0/24", staggered[0])
-        self.assertIn("10.1.1.0/24", staggered[1])
 
-        synthetic = _rows(Path(by_name["synthetic_prefix"]["path"]))
-        self.assertEqual(len(synthetic), 1)
-        self.assertIn("10.50.0.0/24", synthetic[0])
-        self.assertIn("RT,13979,100499", synthetic[0])
-        self.assertEqual(synthetic[0].split("|")[IDX_NEXTHOP], "192.0.2.50")
+        advertised = _rows(Path(by_name["advertise_block"]["path"]))
+        self.assertEqual(len(advertised), 100)
+        self.assertEqual([_prefix(row) for row in advertised[:2]], ["10.50.0.0/24", "10.50.1.0/24"])
+        self.assertEqual(_prefix(advertised[-1]), "10.50.99.0/24")
+        self.assertTrue(all(row.split("|")[IDX_OP] == "A" for row in advertised))
+        self.assertEqual(advertised[0].split("|")[IDX_SOURCE], "32.130.196.181")
+        self.assertEqual(advertised[0].split("|")[IDX_ORIGINATOR], "12.123.71.144")
+        self.assertIn("RT,13979,7285", advertised[0])
+        self.assertEqual(advertised[0].split("|")[IDX_TS], "2026-10-15+18:00:00")
+        self.assertEqual(advertised[1].split("|")[IDX_TS], "2026-10-15+18:00:20")
+        self.assertEqual(advertised[-1].split("|")[IDX_TS], "2026-10-15+18:33:00")
+
+        withdrawn = _rows(Path(by_name["withdraw_block"]["path"]))
+        self.assertEqual(len(withdrawn), 40)
+        self.assertEqual(
+            [_prefix(row) for row in withdrawn],
+            [_prefix(row) for row in advertised[:40]],
+        )
+        self.assertTrue(all(row.split("|")[IDX_OP] == "W" for row in withdrawn))
+        self.assertTrue(all(row.split("|")[IDX_SOURCE] == "32.130.196.181" for row in withdrawn))
+
+        shifted = _rows(Path(by_name["attribute_block"]["path"]))
+        self.assertEqual(len(shifted), 25)
+        first = shifted[0].split("|")
+        self.assertEqual(first[IDX_OP], "A")
+        self.assertEqual(first[IDX_NEXTHOP], "192.0.2.1")
+        self.assertEqual(first[IDX_LOCAL_PREF], "150")
+        self.assertEqual(first[IDX_MED], "100")
+        self.assertTrue(first[IDX_AS_PATH].startswith("65000 65000 65000"))
+        self.assertIn("65535:1", first[IDX_COMMUNITY])
+        self.assertEqual(_prefix(shifted[0]), "10.50.0.0/24")
+        self.assertEqual(_prefix(shifted[-1]), "10.50.24.0/24")
+        self.assertEqual(shifted[0].split("|")[IDX_TS], "2026-10-15+18:34:00")
+        self.assertEqual(shifted[1].split("|")[IDX_TS], "2026-10-15+18:34:20")
 
         for item in updates:
             path = Path(item["path"])
@@ -260,6 +256,92 @@ class ScenarioTest(unittest.TestCase):
                 force=False,
                 minutes_ago=45,
             )
+
+
+class PrefixBlockTest(unittest.TestCase):
+    def test_block_defaults_to_slash_24_inside_the_subnet(self):
+        prefixes = expand_prefix_block("10.50.0.0/16", 100)
+        self.assertEqual(len(prefixes), 100)
+        self.assertEqual(prefixes[0], "10.50.0.0/24")
+        self.assertEqual(prefixes[-1], "10.50.99.0/24")
+
+    def test_one_prefix_is_the_block_itself(self):
+        self.assertEqual(expand_prefix_block("10.50.0.0/16", 1), ["10.50.0.0/16"])
+
+    def test_missing_identity_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = {
+                "actions": [
+                    {
+                        "name": "ads",
+                        "type": "advertise",
+                        "prefix": "10.50.0.0/16",
+                        "count": 2,
+                        "source": "32.130.196.181",
+                    }
+                ]
+            }
+            with self.assertRaises(ValueError) as caught:
+                write_updates(spec, None, Path(tmp), NOW, force=True)
+        self.assertIn("rt", str(caught.exception))
+        self.assertIn("originator_id", str(caught.exception))
+
+    def test_omitted_count_and_interval_use_the_defaults(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            written = write_updates(
+                {
+                    "actions": [
+                        {
+                            "name": "ads",
+                            "type": "advertise",
+                            "prefix": "10.9.0.0/16",
+                            "rt": "13979:7285",
+                            "rd": "13979:1",
+                            "originator_id": "12.123.71.144",
+                            "source": "32.130.196.181",
+                        }
+                    ]
+                },
+                None,
+                Path(tmp),
+                NOW,
+                force=True,
+            )
+            self.assertEqual(written[0]["records"], 100)
+            rows = _rows(Path(written[0]["path"]))
+            self.assertEqual(rows[1].split("|")[IDX_TS], "2026-10-15+18:00:20")
+
+    def test_withdraw_count_cannot_exceed_the_earlier_block(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(ValueError):
+                write_updates(
+                    {
+                        "actions": [
+                            {
+                                "name": "ads",
+                                "type": "advertise",
+                                "prefix": "10.9.0.0/24",
+                                "count": 2,
+                                "prefix_length": 32,
+                                "rt": "13979:7285",
+                                "rd": "13979:1",
+                                "originator_id": "12.123.71.144",
+                                "source": "32.130.196.181",
+                                "interval_seconds": 0,
+                            },
+                            {
+                                "name": "wds",
+                                "type": "withdraw",
+                                "from_action": "ads",
+                                "count": 5,
+                            },
+                        ]
+                    },
+                    None,
+                    Path(tmp),
+                    NOW,
+                    force=True,
+                )
 
 
 class CmdbInputTest(unittest.TestCase):
