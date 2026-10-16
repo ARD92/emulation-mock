@@ -83,12 +83,12 @@ To add a dataset, append a `TableSpec` in `bgp_mock/cmdb.py` and put a list unde
 
 | update_type | ip_type | NLRI |
 |---|---|---|
-| `l3vpn` | `ipv4` | `1,128;<rd>;22;<prefix>` plus `RT_AS2,<asn>,<number>` |
-| `l3vpn` | `ipv6` | `2,128;<rd>;22;<prefix>` plus `RT_AS2,<asn>,<number>` |
+| `l3vpn` | `ipv4` | `1,128;<asn>,<num>;16001;<prefix>` plus `RT,<asn>,<number>` |
+| `l3vpn` | `ipv6` | `2,128;<asn>,<num>;16001;<prefix>` plus `RT,<asn>,<number>` |
 | `inet` | `ipv4` | `1,1;<prefix>` |
 | `inet` | `ipv6` | `2,1;<prefix>` |
 
-The RD is written as given, so an IP RD such as `1,12.122.31.83,13` stays in that form. Nexthop and cluster default to `originator_id`. For L3VPN, column 3 must be a VPN route reflector cloudstorage has already loaded. For inet, it must be an internet route reflector.
+An `asn:num` RD such as `13979:7285` is written in the NLRI as `13979,7285`. An RD that already uses commas, such as `1,12.122.31.83,13`, stays in that form. Nexthop defaults to `originator_id`. Cluster defaults to `source`. The AS path defaults to the RT ASN. Columns 2, 4, 5, 6, 15, 16, and 17 stay empty. For L3VPN, column 3 must be a VPN route reflector cloudstorage has already loaded. For inet, it must be an internet route reflector.
 
 The current cloudstorage update reader keeps AFI 1 only: inet is `1,1` and L3VPN is `1,128`. IPv6 rows use AFI 2 and are skipped by that reader until it accepts AFI 2.
 

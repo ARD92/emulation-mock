@@ -31,7 +31,7 @@ IDX_AGG_ADDR = 16
 IDX_AGG_AS = 17
 IDX_ORIGINATOR = 18
 IDX_CLUSTER = 19
-L3VPN_LABEL = "22"
+L3VPN_LABEL = "16001"
 
 MIN_TOKENS = 20
 SNAPSHOT_OPS = frozenset({"R", "A"})
@@ -260,8 +260,17 @@ def prefix_of(nlri: str) -> str:
     return ""
 
 
+def rd_for_nlri(rd: str) -> str:
+    """Write `asn:num` as `asn,num`. An RD that already contains commas stays as given."""
+    text = str(rd).strip()
+    if "," in text or ":" not in text:
+        return text
+    asn, num = text.split(":", 1)
+    return f"{asn},{num}"
+
+
 def set_rt(tokens: list[str], rt: str) -> None:
-    """Write one RT_AS2 extended community, the form cloudstorage keeps.
+    """Write one `RT,asn,num` extended community.
 
     SAFI 132 also receives the same asn:num inside the NLRI.
     """
@@ -270,7 +279,7 @@ def set_rt(tokens: list[str], rt: str) -> None:
         raise ValueError(f"RT must look like asn:num, got {rt!r}")
     asn, num = normalized.split(":", 1)
     ensure_width(tokens, IDX_EXT)
-    tokens[IDX_EXT] = f"RT_AS2,{asn},{num}"
+    tokens[IDX_EXT] = f"RT,{asn},{num}"
     nlri = tokens[IDX_NLRI]
     _afi, safi = afi_safi(nlri)
     if safi == SAFI_RTC:
@@ -382,7 +391,7 @@ def materialize_prefix(item: dict, template: str) -> str:
         prefix = item.get("prefix")
         if not prefix:
             raise ValueError("prefix requires prefix or nlri")
-        rd = item.get("rd") or item.get("rt") or "13979:1"
+        rd = rd_for_nlri(str(item.get("rd") or item.get("rt") or "13979:1"))
         label = item.get("label") or L3VPN_LABEL
         # cloudstorage reads RD at semicolon [1] and the prefix at semicolon [3].
         tokens[IDX_NLRI] = f"{afi},{safi};{rd};{label};{prefix}"
@@ -404,20 +413,27 @@ def materialize_prefix(item: dict, template: str) -> str:
 
 
 def _fill_path_columns(tokens: list[str], item: dict) -> None:
-    """Replace template leftovers with the columns the update parser stores."""
+    """Match the update column layout: empty unused fields, cluster = source."""
     ensure_width(tokens, IDX_CLUSTER)
+    for index in (2, IDX_PEER_ASN, 5, 6):
+        tokens[index] = ""
     if "community" not in item:
         tokens[IDX_COMMUNITY] = ""
     if "nexthop" not in item:
         tokens[IDX_NEXTHOP] = tokens[IDX_ORIGINATOR] or tokens[IDX_SOURCE]
     if "atomic_aggregate" not in item:
-        tokens[IDX_ATOMIC] = "AG"
+        tokens[IDX_ATOMIC] = ""
     if "aggregator_address" not in item:
-        tokens[IDX_AGG_ADDR] = tokens[IDX_SOURCE]
+        tokens[IDX_AGG_ADDR] = ""
     if "aggregator_as" not in item:
-        tokens[IDX_AGG_AS] = tokens[IDX_PEER_ASN]
+        tokens[IDX_AGG_AS] = ""
     if "cluster" not in item:
-        tokens[IDX_CLUSTER] = tokens[IDX_ORIGINATOR]
+        tokens[IDX_CLUSTER] = tokens[IDX_SOURCE]
+    if not (tokens[IDX_AS_PATH] or "").strip() and item.get("rt"):
+        asn = normalize_rt(str(item["rt"])).split(":", 1)[0]
+        if asn:
+            tokens[IDX_AS_PATH] = asn
+    del tokens[IDX_CLUSTER + 1 :]
 
 
 def row_matches(tokens: list[str], select: dict) -> bool:

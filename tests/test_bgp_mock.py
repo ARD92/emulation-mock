@@ -193,17 +193,18 @@ class ScenarioTest(unittest.TestCase):
         self.assertEqual(_prefix(advertised[-1]), "10.50.99.0/24")
         self.assertTrue(all(row.split("|")[IDX_OP] == "A" for row in advertised))
         first_ad = advertised[0].split("|")
-        self.assertGreaterEqual(len(first_ad), 20)
+        self.assertEqual(len(first_ad), 20)
         self.assertEqual(first_ad[IDX_SOURCE], "32.130.196.181")
         self.assertEqual(first_ad[IDX_ORIGINATOR], "12.123.71.144")
-        self.assertEqual(first_ad[7], "1,128;13979:7285;22;10.50.0.0/24")
-        self.assertEqual(first_ad[14], "RT_AS2,13979,7285")
+        self.assertEqual(first_ad[2], "")
+        self.assertEqual(first_ad[4:7], ["", "", ""])
+        self.assertEqual(first_ad[7], "1,128;13979,7285;16001;10.50.0.0/24")
+        self.assertEqual(first_ad[IDX_AS_PATH], "13979")
+        self.assertEqual(first_ad[14], "RT,13979,7285")
         self.assertEqual(first_ad[IDX_NEXTHOP], "12.123.71.144")
         self.assertEqual(first_ad[13], "")
-        self.assertEqual(first_ad[15], "AG")
-        self.assertEqual(first_ad[16], "32.130.196.181")
-        self.assertEqual(first_ad[17], "13979")
-        self.assertEqual(first_ad[19], "12.123.71.144")
+        self.assertEqual(first_ad[15:18], ["", "", ""])
+        self.assertEqual(first_ad[19], "32.130.196.181")
         self.assertEqual(advertised[0].split("|")[IDX_TS], "2026-10-15+18:00:00")
         self.assertEqual(advertised[1].split("|")[IDX_TS], "2026-10-15+18:00:20")
         self.assertEqual(advertised[-1].split("|")[IDX_TS], "2026-10-15+18:33:00")
@@ -333,8 +334,28 @@ class PrefixBlockTest(unittest.TestCase):
             "source": "2001:db8::2",
         })
         tokens = line.split("|")
-        self.assertEqual(tokens[7], "2,128;13979:7285;22;2001:db8::/32")
-        self.assertEqual(tokens[14], "RT_AS2,13979,7285")
+        self.assertEqual(tokens[7], "2,128;13979,7285;16001;2001:db8::/32")
+        self.assertEqual(tokens[14], "RT,13979,7285")
+        self.assertEqual(tokens[19], "2001:db8::2")
+        self.assertEqual(len(tokens), 20)
+
+    def test_comma_rd_stays_in_the_nlri(self):
+        line = self._one({
+            "name": "ads",
+            "type": "advertise",
+            "prefix": "192.0.2.0/24",
+            "count": 1,
+            "interval_seconds": 0,
+            "rt": "13979:7285",
+            "rd": "1,12.122.31.83,13",
+            "originator_id": "12.123.71.144",
+            "source": "32.155.155.155",
+        })
+        tokens = line.split("|")
+        self.assertEqual(tokens[7], "1,128;1,12.122.31.83,13;16001;192.0.2.0/24")
+        self.assertEqual(tokens[8], "13979")
+        self.assertEqual(tokens[14], "RT,13979,7285")
+        self.assertEqual(tokens[19], "32.155.155.155")
 
     def test_ip_type_must_match_the_prefix(self):
         with tempfile.TemporaryDirectory() as tmp:
