@@ -261,11 +261,16 @@ def prefix_of(nlri: str) -> str:
 
 
 def rd_for_nlri(rd: str) -> str:
-    """Write `asn:num` as `asn,num`. An RD that already contains commas stays as given."""
+    """Write a two-part `asn:num` RD as `asn,num`.
+
+    A comma RD, or a type-0 RD such as `0:13979:1080400`, stays as given.
+    """
     text = str(rd).strip()
-    if "," in text or ":" not in text:
+    if "," in text or text.count(":") != 1:
         return text
     asn, num = text.split(":", 1)
+    if not asn.isdigit() or not num.isdigit():
+        return text
     return f"{asn},{num}"
 
 

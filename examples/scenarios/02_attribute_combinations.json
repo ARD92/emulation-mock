@@ -1,0 +1,92 @@
+{
+  "description": "Twenty identical prefixes, then combined attribute changes. pfx0 changes MED, nexthop, and originator together. pfx1 moves nexthop and originator inside 12.123. pfx2 moves them to 10.255. The last action advertises a prefix that is not in the baseline.",
+  "actions": [
+    {
+      "name": "baseline",
+      "type": "advertise",
+      "prefix": "10.71.0.0/16",
+      "count": 20,
+      "interval_seconds": 0,
+      "update_type": "l3vpn",
+      "ip_type": "ipv4",
+      "rt": "13979:7285",
+      "rd": "0:13979:1080400",
+      "originator_id": "12.123.71.144",
+      "source": "32.130.196.181",
+      "nexthop": "12.123.71.144",
+      "as_path": "64652 42000925143",
+      "origin": "IGP",
+      "local_pref": "100",
+      "med": "0",
+      "community": "13979:2913 54535:11147 54535:20004",
+      "ext_community": "RT_AS2,13979,7285",
+      "label": "27002",
+      "cluster": "2.0.4.12",
+      "atomic_aggregate": "NAG",
+      "aggregator_address": "0.0.0.0",
+      "aggregator_as": "0"
+    },
+    {
+      "name": "pfx0_med_nexthop_originator",
+      "type": "attribute_change",
+      "from_action": "baseline",
+      "from_index": 0,
+      "count": 1,
+      "interval_seconds": 0,
+      "attributes": {
+        "med": "200",
+        "nexthop": "10.255.1.3",
+        "originator": "10.255.1.1"
+      }
+    },
+    {
+      "name": "pfx1_within_region_nexthop_originator",
+      "type": "attribute_change",
+      "from_action": "baseline",
+      "from_index": 1,
+      "count": 1,
+      "interval_seconds": 0,
+      "attributes": {
+        "nexthop": "12.123.80.10",
+        "originator": "12.123.80.10"
+      }
+    },
+    {
+      "name": "pfx2_across_region_nexthop_originator",
+      "type": "attribute_change",
+      "from_action": "baseline",
+      "from_index": 2,
+      "count": 1,
+      "interval_seconds": 0,
+      "attributes": {
+        "nexthop": "10.255.1.3",
+        "originator": "10.255.1.1"
+      }
+    },
+    {
+      "name": "new_prefix_3_5_7",
+      "type": "advertise",
+      "prefix": "3.5.7.0/24",
+      "count": 1,
+      "interval_seconds": 0,
+      "update_type": "l3vpn",
+      "ip_type": "ipv4",
+      "rt": "13979:7285",
+      "rd": "0:13979:1080400",
+      "originator_id": "12.123.71.144",
+      "source": "32.130.196.181",
+      "nexthop": "10.255.1.3",
+      "as_path": "64496",
+      "origin": "IGP",
+      "local_pref": "100",
+      "med": "0",
+      "community": "13979:2913 54535:11147 54535:20004",
+      "ext_community": "RT_AS2,13979,7285",
+      "label": "27002",
+      "cluster": "2.0.4.12",
+      "atomic_aggregate": "NAG",
+      "aggregator_address": "0.0.0.0",
+      "aggregator_as": "0"
+    }
+  ]
+}

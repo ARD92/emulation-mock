@@ -1,0 +1,38 @@
+{
+  "description": "Advertise five new prefixes, then flap each one six times. Advertise and withdraw alternate every 5 seconds in the flap file.",
+  "actions": [
+    {
+      "name": "baseline",
+      "type": "advertise",
+      "prefix": "10.72.0.0/24",
+      "count": 5,
+      "interval_seconds": 0,
+      "update_type": "l3vpn",
+      "ip_type": "ipv4",
+      "rt": "13979:7285",
+      "rd": "0:13979:1080400",
+      "originator_id": "12.123.71.144",
+      "source": "32.130.196.181",
+      "nexthop": "12.123.71.144",
+      "as_path": "64652 42000925143",
+      "origin": "IGP",
+      "local_pref": "100",
+      "med": "0",
+      "community": "13979:2913 54535:11147 54535:20004",
+      "ext_community": "RT_AS2,13979,7285",
+      "label": "27002",
+      "cluster": "2.0.4.12",
+      "atomic_aggregate": "NAG",
+      "aggregator_address": "0.0.0.0",
+      "aggregator_as": "0",
+      "prefix_length": 28
+    },
+    {
+      "name": "flap_quick",
+      "type": "flap",
+      "from_action": "baseline",
+      "repeats": 6,
+      "interval_seconds": 5
+    }
+  ]
+}

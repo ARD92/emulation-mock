@@ -197,6 +197,11 @@ def _block_bases(action: dict, name: str) -> list[str]:
             "nexthop",
             "cluster",
             "community",
+            "ext_community",
+            "as_path",
+            "origin",
+            "local_pref",
+            "med",
             "peer_asn",
             "label",
             "atomic_aggregate",
@@ -215,15 +220,19 @@ def _from_action_bases(action: dict, name: str, produced: dict[str, list[str]]) 
     ref = str(action["from_action"])
     if ref not in produced:
         raise ValueError(f"action {name}: from_action {ref!r} is not an earlier action")
-    rows = produced[ref]
+    rows = list(produced[ref])
+    start = int(action.get("from_index") or 0)
+    if start < 0 or start > len(rows):
+        raise ValueError(f"action {name}: from_index {start} is outside the {len(rows)} prefixes from {ref}")
+    selected = rows[start:]
     count = _count(action, None)
     if count is None:
-        return list(rows)
-    if count > len(rows):
+        return selected
+    if count > len(selected):
         raise ValueError(
-            f"action {name}: count {count} is larger than the {len(rows)} prefixes from {ref}"
+            f"action {name}: count {count} is larger than the {len(selected)} prefixes from {ref} at index {start}"
         )
-    return list(rows[:count])
+    return selected[:count]
 
 
 def _bases_for(
@@ -298,6 +307,22 @@ def expand_action(action: dict, bases: list[str], start: datetime) -> list[tuple
 
     clock = start
     rows: list[tuple[datetime, str]] = []
+    cycle = action.get("cycle")
+    if cycle:
+        if not isinstance(cycle, list) or not cycle:
+            raise ValueError(f"action {name}: cycle must be a non-empty list of attribute objects")
+        turns = repeats if repeats > 0 else 1
+        for base in bases:
+            for _ in range(turns):
+                for step in cycle:
+                    if not isinstance(step, dict):
+                        raise ValueError(f"action {name}: each cycle step must be an object")
+                    stepped = dict(action)
+                    stepped["attributes"] = step
+                    rows.append(_stamp(_prepare(base, stepped), op, clock))
+                    if interval_seconds > 0:
+                        clock += interval
+        return rows
     for base in bases:
         tokens = _prepare(base, action)
         if kind == "flap":
@@ -318,6 +343,20 @@ def _next_minute(value: datetime) -> datetime:
     return trimmed + timedelta(minutes=1)
 
 
+def _offset_minutes(action: dict, name: str) -> float:
+    """Minutes after the previous action's start time. Zero keeps the next free second."""
+    raw = action.get("offset_minutes")
+    if raw is None or str(raw).strip() == "":
+        return 0.0
+    try:
+        minutes = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"action {name}: offset_minutes must be a number") from exc
+    if minutes < 0:
+        raise ValueError(f"action {name}: offset_minutes must be >= 0")
+    return minutes
+
+
 def write_updates(
     spec: dict,
     snapshot: Path | None,
@@ -328,6 +367,7 @@ def write_updates(
     """Write one gzip per action. File tags stay unique inside the run."""
     actions = spec["actions"]
     cursor = now.replace(microsecond=0)
+    previous_start: datetime | None = None
     used_tags: set[str] = set()
     produced: dict[str, list[str]] = {}
     written: list[dict] = []
@@ -335,10 +375,15 @@ def write_updates(
         name = _action_name(action, index)
         if name in produced:
             raise ValueError(f"duplicate action name {name!r}")
+        offset = _offset_minutes(action, name)
+        if offset:
+            anchor = previous_start if previous_start is not None else cursor
+            cursor = anchor + timedelta(minutes=offset)
         tag = format_tag(cursor)
         if tag in used_tags:
             cursor = _next_minute(cursor)
             tag = format_tag(cursor)
+        previous_start = cursor
         bases = _bases_for(action, snapshot, index, produced)
         produced[name] = bases
         rows = expand_action(action, bases, cursor)

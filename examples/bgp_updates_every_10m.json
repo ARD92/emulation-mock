@@ -1,0 +1,59 @@
+{
+  "actions": [
+    {
+      "name": "wave_1",
+      "type": "advertise",
+      "update_type": "l3vpn",
+      "ip_type": "ipv4",
+      "prefix": "10.60.0.0/16",
+      "count": 5,
+      "interval_seconds": 0,
+      "rt": "13979:7285",
+      "rd": "13979:7285",
+      "originator_id": "12.123.71.144",
+      "source": "32.130.196.181"
+    },
+    {
+      "name": "wave_2",
+      "type": "advertise",
+      "offset_minutes": 10,
+      "update_type": "l3vpn",
+      "ip_type": "ipv4",
+      "prefix": "10.61.0.0/16",
+      "count": 5,
+      "interval_seconds": 0,
+      "rt": "13979:7285",
+      "rd": "13979:7285",
+      "originator_id": "12.123.71.144",
+      "source": "32.130.196.181"
+    },
+    {
+      "name": "wave_3",
+      "type": "advertise",
+      "offset_minutes": 10,
+      "update_type": "l3vpn",
+      "ip_type": "ipv4",
+      "prefix": "10.62.0.0/16",
+      "count": 5,
+      "interval_seconds": 0,
+      "rt": "13979:7285",
+      "rd": "13979:7285",
+      "originator_id": "12.123.71.144",
+      "source": "32.130.196.181"
+    },
+    {
+      "name": "wave_4",
+      "type": "advertise",
+      "offset_minutes": 10,
+      "update_type": "l3vpn",
+      "ip_type": "ipv4",
+      "prefix": "10.63.0.0/16",
+      "count": 5,
+      "interval_seconds": 0,
+      "rt": "13979:7285",
+      "rd": "13979:7285",
+      "originator_id": "12.123.71.144",
+      "source": "32.130.196.181"
+    }
+  ]
+}

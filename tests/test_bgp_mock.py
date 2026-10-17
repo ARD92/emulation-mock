@@ -357,6 +357,113 @@ class PrefixBlockTest(unittest.TestCase):
         self.assertEqual(tokens[14], "RT,13979,7285")
         self.assertEqual(tokens[19], "32.155.155.155")
 
+    def test_type0_rd_and_live_attributes_are_kept(self):
+        line = self._one({
+            "name": "ads",
+            "type": "advertise",
+            "prefix": "10.210.102.64/27",
+            "count": 1,
+            "interval_seconds": 0,
+            "rt": "13979:7285",
+            "rd": "0:13979:1080400",
+            "originator_id": "12.123.71.144",
+            "source": "32.130.196.181",
+            "nexthop": "12.123.71.144",
+            "as_path": "64652 42000925143",
+            "community": "13979:2913 54535:11147 54535:20004",
+            "ext_community": "RT_AS2,13979,7285",
+            "label": "27002",
+            "cluster": "2.0.4.12",
+            "atomic_aggregate": "NAG",
+            "aggregator_address": "0.0.0.0",
+            "aggregator_as": "0",
+        })
+        tokens = line.split("|")
+        self.assertEqual(tokens[7], "1,128;0:13979:1080400;27002;10.210.102.64/27")
+        self.assertEqual(tokens[8], "64652 42000925143")
+        self.assertEqual(tokens[13], "13979:2913 54535:11147 54535:20004")
+        self.assertEqual(tokens[14], "RT_AS2,13979,7285")
+        self.assertEqual(tokens[15], "NAG")
+        self.assertEqual(tokens[16], "0.0.0.0")
+        self.assertEqual(tokens[17], "0")
+        self.assertEqual(tokens[19], "2.0.4.12")
+
+    def test_from_index_changes_one_prefix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            written = write_updates(
+                {
+                    "actions": [
+                        {
+                            "name": "baseline",
+                            "type": "advertise",
+                            "prefix": "10.70.0.0/16",
+                            "count": 3,
+                            "interval_seconds": 0,
+                            "rt": "13979:7285",
+                            "rd": "13979:1",
+                            "originator_id": "12.123.71.144",
+                            "source": "32.130.196.181",
+                        },
+                        {
+                            "name": "second",
+                            "type": "attribute_change",
+                            "from_action": "baseline",
+                            "from_index": 1,
+                            "count": 1,
+                            "attributes": {"nexthop": "10.255.1.3"},
+                        },
+                    ]
+                },
+                None,
+                Path(tmp),
+                NOW,
+                force=True,
+            )
+            changed = _rows(Path(written[1]["path"]))
+            self.assertEqual(len(changed), 1)
+            self.assertEqual(changed[0].split("|")[7].split(";")[-1], "10.70.1.0/24")
+            self.assertEqual(changed[0].split("|")[IDX_NEXTHOP], "10.255.1.3")
+
+    def test_cycle_oscillates_and_returns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            written = write_updates(
+                {
+                    "actions": [
+                        {
+                            "name": "baseline",
+                            "type": "advertise",
+                            "prefix": "10.73.0.0/32",
+                            "count": 1,
+                            "interval_seconds": 0,
+                            "rt": "13979:7285",
+                            "rd": "13979:1",
+                            "originator_id": "12.123.71.144",
+                            "source": "32.130.196.181",
+                            "nexthop": "12.123.71.144",
+                        },
+                        {
+                            "name": "osc",
+                            "type": "attribute_change",
+                            "from_action": "baseline",
+                            "interval_seconds": 5,
+                            "repeats": 1,
+                            "cycle": [
+                                {"nexthop": "10.255.1.3", "originator": "10.255.1.1"},
+                                {"nexthop": "12.123.71.144", "originator": "12.123.71.144"},
+                            ],
+                        },
+                    ]
+                },
+                None,
+                Path(tmp),
+                NOW,
+                force=True,
+            )
+            rows = [row.split("|") for row in _rows(Path(written[1]["path"]))]
+            self.assertEqual([row[IDX_NEXTHOP] for row in rows], ["10.255.1.3", "12.123.71.144"])
+            self.assertEqual([row[IDX_ORIGINATOR] for row in rows], ["10.255.1.1", "12.123.71.144"])
+            self.assertEqual([row[IDX_TS] for row in rows], ["2026-10-15+18:01:00", "2026-10-15+18:01:05"])
+
     def test_ip_type_must_match_the_prefix(self):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(ValueError):
@@ -423,6 +530,46 @@ class PrefixBlockTest(unittest.TestCase):
             self.assertEqual(written[0]["records"], 100)
             rows = _rows(Path(written[0]["path"]))
             self.assertEqual(rows[1].split("|")[IDX_TS], "2026-10-15+18:00:20")
+
+    def test_offset_minutes_writes_a_new_file_each_wave(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            written = write_updates(
+                {
+                    "actions": [
+                        {
+                            "name": "wave_1",
+                            "type": "advertise",
+                            "prefix": "10.60.0.0/16",
+                            "count": 5,
+                            "interval_seconds": 0,
+                            "rt": "13979:7285",
+                            "rd": "13979:7285",
+                            "originator_id": "12.123.71.144",
+                            "source": "32.130.196.181",
+                        },
+                        {
+                            "name": "wave_2",
+                            "type": "advertise",
+                            "offset_minutes": 10,
+                            "prefix": "10.61.0.0/16",
+                            "count": 5,
+                            "interval_seconds": 0,
+                            "rt": "13979:7285",
+                            "rd": "13979:7285",
+                            "originator_id": "12.123.71.144",
+                            "source": "32.130.196.181",
+                        },
+                    ]
+                },
+                None,
+                Path(tmp),
+                NOW,
+                force=True,
+            )
+        self.assertEqual([item["tag"] for item in written], ["202610151800", "202610151810"])
+        self.assertEqual([item["records"] for item in written], [5, 5])
+        self.assertEqual(written[1]["first_ts"], "2026-10-15+18:10:00")
+        self.assertNotEqual(written[0]["path"], written[1]["path"])
 
     def test_withdraw_count_cannot_exceed_the_earlier_block(self):
         with tempfile.TemporaryDirectory() as tmp:

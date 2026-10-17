@@ -1,0 +1,129 @@
+{
+  "description": "Twenty identical L3VPN prefixes, then one attribute change on each of the first nine. Compare the score of the changed prefix with the unchanged prefixes in the baseline file.",
+  "actions": [
+    {
+      "name": "baseline",
+      "type": "advertise",
+      "prefix": "10.70.0.0/16",
+      "count": 20,
+      "interval_seconds": 0,
+      "update_type": "l3vpn",
+      "ip_type": "ipv4",
+      "rt": "13979:7285",
+      "rd": "0:13979:1080400",
+      "originator_id": "12.123.71.144",
+      "source": "32.130.196.181",
+      "nexthop": "12.123.71.144",
+      "as_path": "64652 42000925143",
+      "origin": "IGP",
+      "local_pref": "100",
+      "med": "0",
+      "community": "13979:2913 54535:11147 54535:20004",
+      "ext_community": "RT_AS2,13979,7285",
+      "label": "27002",
+      "cluster": "2.0.4.12",
+      "atomic_aggregate": "NAG",
+      "aggregator_address": "0.0.0.0",
+      "aggregator_as": "0"
+    },
+    {
+      "name": "pfx1_nexthop_only",
+      "type": "attribute_change",
+      "from_action": "baseline",
+      "from_index": 0,
+      "count": 1,
+      "interval_seconds": 0,
+      "attributes": {
+        "nexthop": "10.255.1.3"
+      }
+    },
+    {
+      "name": "pfx2_community_add",
+      "type": "attribute_change",
+      "from_action": "baseline",
+      "from_index": 1,
+      "count": 1,
+      "interval_seconds": 0,
+      "attributes": {
+        "community_add": "13979:9999"
+      }
+    },
+    {
+      "name": "pfx3_community_delete",
+      "type": "attribute_change",
+      "from_action": "baseline",
+      "from_index": 2,
+      "count": 1,
+      "interval_seconds": 0,
+      "attributes": {
+        "community": ""
+      }
+    },
+    {
+      "name": "pfx4_as_path_change",
+      "type": "attribute_change",
+      "from_action": "baseline",
+      "from_index": 3,
+      "count": 1,
+      "interval_seconds": 0,
+      "attributes": {
+        "as_path": "64652 42000925143 64496"
+      }
+    },
+    {
+      "name": "pfx5_rt_add",
+      "type": "attribute_change",
+      "from_action": "baseline",
+      "from_index": 4,
+      "count": 1,
+      "interval_seconds": 0,
+      "attributes": {
+        "ext_community": "RT_AS2,13979,7285 RT_AS2,13979,7286"
+      }
+    },
+    {
+      "name": "pfx6_rt_delete",
+      "type": "attribute_change",
+      "from_action": "baseline",
+      "from_index": 5,
+      "count": 1,
+      "interval_seconds": 0,
+      "attributes": {
+        "ext_community": ""
+      }
+    },
+    {
+      "name": "pfx7_med_only",
+      "type": "attribute_change",
+      "from_action": "baseline",
+      "from_index": 6,
+      "count": 1,
+      "interval_seconds": 0,
+      "attributes": {
+        "med": "250"
+      }
+    },
+    {
+      "name": "pfx8_local_pref_only",
+      "type": "attribute_change",
+      "from_action": "baseline",
+      "from_index": 7,
+      "count": 1,
+      "interval_seconds": 0,
+      "attributes": {
+        "local_pref": "50"
+      }
+    },
+    {
+      "name": "pfx9_originator_only",
+      "type": "attribute_change",
+      "from_action": "baseline",
+      "from_index": 8,
+      "count": 1,
+      "interval_seconds": 0,
+      "attributes": {
+        "originator": "12.123.80.10"
+      }
+    }
+  ]
+}
